@@ -19,6 +19,8 @@ from pytorch_lightning.utilities import rank_zero_info
 
 from ldm.data.base import Txt2ImgIterableBaseDataset
 from ldm.util import instantiate_from_config
+from tarp import get_tarp_coverage
+import matplotlib.pyplot as plt
 
 
 def get_parser(**parser_kwargs):
@@ -286,6 +288,41 @@ class SetupCallback(Callback):
                     pass
 
 
+class TARPLogger(Callback):
+    def __init__(self, batch_frequency, n_samples):
+        super().__init__()
+        self.batch_freq = batch_frequency
+        self.n_samples = n_samples
+    
+    def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx):
+        if batch_idx == 0 and pl_module.global_step > 0 and pl_module.current_epoch > 0 and pl_module.current_epoch % 15 == 0:
+            # print("TARPLogger: {}".format(batch_idx))
+            bsz = batch["image"].shape[0]
+            all_samples = []
+            for i in range(bsz):
+                with torch.no_grad():
+                    samples, _ = pl_module.sample_log(cond=None, batch_size=self.n_samples,
+                                                            ddim=True, ddim_steps=50)
+                    samples = pl_module.decode_first_stage(samples)
+                samples = samples.transpose(1, 2).transpose(2, 3)
+                samples = samples.reshape(self.n_samples, 1, -1).cpu().numpy()
+                all_samples.append(samples)
+            samples = np.concatenate(all_samples, axis=1)
+            gt_samples = batch["image"].reshape(bsz, -1).cpu().numpy()
+            filename = "{}_gs-{:06}_e-{:06}_b-{:06}.png".format(
+                    "tarp",
+                    pl_module.global_step,
+                    pl_module.current_epoch,
+                    batch_idx)
+            root = os.path.join(pl_module.logger.save_dir, "images", "val")
+            coverage = get_tarp_coverage(samples, gt_samples, num_alpha_bins=20)
+            plt.plot(coverage[1], coverage[0])
+            path  = os.path.join(root, filename)
+            os.makedirs(os.path.split(path)[0], exist_ok=True)
+            plt.savefig(path)
+            plt.close()
+
+
 class ImageLogger(Callback):
     def __init__(self, batch_frequency, max_images, clamp=True, increase_log_steps=True,
                  rescale=True, disabled=False, log_on_batch_idx=False, log_first_step=False,
@@ -348,7 +385,7 @@ class ImageLogger(Callback):
             is_train = pl_module.training
             if is_train:
                 pl_module.eval()
-
+            # import pdb; pdb.set_trace();
             with torch.no_grad():
                 images = pl_module.log_images(batch, split=split, **self.log_images_kwargs)
 
@@ -609,6 +646,13 @@ if __name__ == "__main__":
                     "batch_frequency": 750,
                     "max_images": 4,
                     "clamp": True
+                }
+            },
+            "tarp_logger": {
+                "target": "main.TARPLogger",
+                "params": {
+                    "batch_frequency": 10,
+                    "n_samples": 100
                 }
             },
             "learning_rate_logger": {

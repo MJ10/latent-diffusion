@@ -4,9 +4,11 @@ model:
   params:
     linear_start: 0.0015
     linear_end: 0.0195
+    beta_schedule: "cosine"
+    cosine_s: 8e-2
     num_timesteps_cond: 1
-    log_every_t: 200
-    timesteps: 1000
+    log_every_t: 20
+    timesteps: 100
     first_stage_key: image
     image_size: 64
     channels: 3
@@ -69,6 +71,17 @@ data:
         key: "galaxies"
         channels: [0, 1, 2] 
         channels_last: True
+        start_idx: 100
+        end_idx: -1
+    validation:
+      target: ldm.data.astro.AstroDataset
+      params:
+        path_to_h5: /network/scratch/m/moksh.jain/astro/inverse_problem/probes.h5
+        key: "galaxies"
+        channels: [0, 1, 2] 
+        channels_last: True
+        start_idx: 0
+        end_idx: 100
     # validation:
     #   target: ldm.data.lsun.LSUNBedroomsValidation
     #   params:
@@ -83,6 +96,10 @@ lightning:
         batch_frequency: 50
         max_images: 8
         increase_log_steps: False
+        log_images_kwargs:
+          ddim_steps: 20
+          inpaint: False
+          plot_progressive_rows: False
 
   trainer:
     benchmark: True
